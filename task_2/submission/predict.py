@@ -151,7 +151,7 @@ def predict(df: pd.DataFrame) -> pd.DataFrame:
         Датафрейм предсказаний.
         Должен содержать то же количество строк и в том же порядке, а также колонки `target0` и `target1`.
     """    
-    model = fc_model(25, [512, 32, 2], 'cpu')
+    model = fc_model(25, [128, 16, 2], 'cpu')
     model.load_state_dict(
         t.load(MODEL_FILE, 
                map_location=t.device('cpu')
