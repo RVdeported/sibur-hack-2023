@@ -151,7 +151,7 @@ def predict(df: pd.DataFrame) -> pd.DataFrame:
         Датафрейм предсказаний.
         Должен содержать то же количество строк и в том же порядке, а также колонки `target0` и `target1`.
     """    
-    model = fc_model(25, [128, 16, 2], 'cpu')
+    model = fc_model(25, [256, 16, 2], 'cpu')
     model.load_state_dict(
         t.load(MODEL_FILE, 
                map_location=t.device('cpu')
@@ -166,12 +166,6 @@ def predict(df: pd.DataFrame) -> pd.DataFrame:
     loader = pipe.transform(df)[1]
 
     return pred(loader, model, "cpu")
-
-if __name__ == "__main__":
-    # MODEL_FILE = pathlib.Path("../submission/model.dict")
-    ds = pd.read_parquet("../data/train.parquet")[:100]
-    print(predict(ds.drop(["target0", "target1"], axis=1)))
-
 
 
 

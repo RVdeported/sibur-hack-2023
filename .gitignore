@@ -2,6 +2,8 @@ task_1/data/task_1_train/
 trash/
 baselines/sc2023-1-baseline/
 baselines/sc2023-2-baseline/
+models/
+runs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
