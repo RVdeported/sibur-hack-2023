@@ -11,88 +11,67 @@ DATA_DIR = pathlib.Path(".")
 MODEL_FILE = pathlib.Path(__file__).parent.joinpath("model.t")
 PIPE_FILE = pathlib.Path(__file__).parent.joinpath("pipe.pckl")
 
-
-class fc_model_res_d(t.nn.Module):
-    def __init__(self, input_dim, stacks=3, layers=[256, 16, 256], device='cpu'):
+class fc_model_mul(t.nn.Module):
+    def __init__(self, input_dim, layers=[512, 128, 16], device='cpu'):
         super().__init__()
         self.device=device
-        self.stacks=stacks
 
-        self.blocks_1 = t.nn.ParameterList([])
-        self.rec_1 = t.nn.ParameterList([])
-        self.pred_1 = t.nn.ParameterList([])
-        for _ in range(stacks):
-            self.blocks_1.append(
-                t.nn.Sequential(
-                    t.nn.Linear(input_dim, layers[0]),
-                    t.nn.ReLU(),
-                    t.nn.Linear(layers[0], layers[1]),
-                    t.nn.ReLU(),
-            ))
+        self.base=t.nn.Sequential(
+            t.nn.Linear(input_dim, layers[0]),
+            t.nn.ReLU(),
+        )
 
-            self.rec_1.append(
-                t.nn.Sequential(
-                    t.nn.Linear(layers[1], layers[2]),
-                    t.nn.ReLU(),
-                    t.nn.Linear(layers[2], input_dim),
-                )
+        self.zero = t.nn.ParameterList([
+            t.nn.Sequential(
+                t.nn.Linear(layers[0], layers[1]),
+                t.nn.ReLU(),
+                t.nn.Linear(layers[1], layers[2]),
+                t.nn.ReLU(),
+                t.nn.Linear(layers[2], 1),
+            ),
+            t.nn.Sequential(
+                t.nn.Linear(layers[0], layers[1]),
+                t.nn.ReLU(),
+                t.nn.Linear(layers[1], layers[2]),
+                t.nn.ReLU(),
+                t.nn.Linear(layers[2], 1),
             )
+        ])
 
-            self.pred_1.append(
-                t.nn.Sequential(
-                t.nn.Linear(layers[1], 2),
-                )
+        self.one = t.nn.ParameterList([
+            t.nn.Sequential(
+                t.nn.Linear(layers[0], layers[1]),
+                t.nn.ReLU(),
+                t.nn.Linear(layers[1], layers[2]),
+                t.nn.ReLU(),
+                t.nn.Linear(layers[2], 1),
+            ),
+            t.nn.Sequential(
+                t.nn.Linear(layers[0], layers[1]),
+                t.nn.ReLU(),
+                t.nn.Linear(layers[1], layers[2]),
+                t.nn.ReLU(),
+                t.nn.Linear(layers[2], 1),
             )
-
-        self.blocks_2 = t.nn.ParameterList([])
-        self.rec_2 = t.nn.ParameterList([])
-        self.pred_2 = t.nn.ParameterList([])
-        for _ in range(stacks):
-            self.blocks_2.append(
-                t.nn.Sequential(
-                    t.nn.Linear(input_dim, layers[0]),
-                    t.nn.ReLU(),
-                    t.nn.Linear(layers[0], layers[1]),
-                    t.nn.ReLU(),
-            ))
-
-            self.rec_2.append(
-                t.nn.Sequential(
-                    t.nn.Linear(layers[1], layers[2]),
-                    t.nn.ReLU(),
-                    t.nn.Linear(layers[2], input_dim),
-                )
-            )
-
-            self.pred_2.append(
-                t.nn.Sequential(
-                t.nn.Linear(layers[1], 2),
-                )
-            )
+        ])
 
 
-        
 
     def forward(self, X):
         out = t.zeros((X.shape[0], 2), device=self.device, dtype=t.float32)
         
         inds_one = (X[:, -1] == t.scalar_tensor(1)).nonzero().T[0]
         inds_zero = (X[:, -1] == t.scalar_tensor(0)).nonzero().T[0]
-        
-        res_1 = X[inds_zero]
-        res_2 = X[inds_one]
 
-        for i in range(self.stacks):
-            step_1 = self.blocks_1[i](res_1)
-            res_1 = self.rec_1[i](step_1)
-            out[inds_zero] += self.pred_1[i](step_1)
+        step = self.base(X)
 
-            step_2 = self.blocks_1[i](res_2)
-            res_2 = self.rec_1[i](step_2)
-            out[inds_one] += self.pred_2[i](step_2)
+        out[inds_zero, 0] = self.zero[0](step[inds_zero]).squeeze()
+        out[inds_zero, 1] = self.zero[1](step[inds_zero]).squeeze()
+
+        out[inds_one, 0] = self.one[0](step[inds_one]).squeeze()
+        out[inds_one, 1] = self.one[1](step[inds_one]).squeeze()     
 
         return out
-
 
 class Pipe:
     def __init__(self, cols_to_short=[], batch_size=64, noise_str=0.01):
@@ -110,8 +89,8 @@ class Pipe:
     def quntize(self, X):
         X_ = X.copy()
         
-        for col in self.cols_to_short:
-            X_ = X_[X_[col] < X_[col].quantile(0.999)]
+        # for col in self.cols_to_short:
+        #     X_ = X_[X_[col] < X_[col].quantile(0.999)]
         
         return X_
 
@@ -131,6 +110,11 @@ class Pipe:
         
 
         X_ = pd.DataFrame(self.min_max.transform(X_), columns=X_.columns) 
+        X_["feature_23_cat"] = (X_["feature23"] > 70) * 1
+        X_["feature_24_cat"] = (X_["feature24"] > 20) * 1
+        X_["feature_17_cat"] = (X_["feature17"] > -10) * 1
+        X_["feature_1_cat"] = (X_["feature1"] > 25) * 1
+        
         X_["cluster"] = (X_["feature4"] == 1) * 1
         X_.drop("feature4", axis=1, inplace=True)
 
@@ -141,7 +125,7 @@ class Pipe:
             noise[:,:-1] = t.rand((X_t.shape[0], X_t.shape[1]-1)) * self.noise_str
             X_t = t.cat(
                 [
-                    X_t,
+                    # X_t,
                     X_t + noise
                 ]
             )
@@ -150,7 +134,7 @@ class Pipe:
         if y is not None:
             y_t = t.tensor(y_.to_numpy(), dtype=t.float32)
             if train_df:
-                y_t = t.cat([y_t, y_t])    
+                y_t = t.cat([y_t])    
             ds = t.utils.data.TensorDataset(X_t, y_t)
         else:
             ds = t.utils.data.TensorDataset(X_t)
@@ -176,9 +160,7 @@ class Pipe:
         self.min_max = params["scaler"]
         self.cols_to_short = params["cols"] 
 
-    
 
-    
 def pred(ldr, model, device='cpu'):
     res = t.tensor([], dtype=t.float32)
 
@@ -194,8 +176,6 @@ def pred(ldr, model, device='cpu'):
 
     return res
 
-
-
 def predict(df: pd.DataFrame) -> pd.DataFrame:
     """
     Вычисление предсказаний.
@@ -209,7 +189,14 @@ def predict(df: pd.DataFrame) -> pd.DataFrame:
         Датафрейм предсказаний.
         Должен содержать то же количество строк и в том же порядке, а также колонки `target0` и `target1`.
     """    
-    model = fc_model_res_d(25, 5, [64, 8, 64], 'cpu')
+
+
+    pipe = Pipe(batch_size=256)
+    pipe.unpack(PIPE_FILE)
+
+    df, loader = pipe.transform(df)
+
+    model = fc_model_mul(df.tensors[0].shape[1], [1024, 256, 32, 2], 'cpu')
     model.load_state_dict(
         t.load(MODEL_FILE, 
                map_location=t.device('cpu')
@@ -217,11 +204,6 @@ def predict(df: pd.DataFrame) -> pd.DataFrame:
             )
     model = model.cpu()
     model.device = "cpu"
-
-    pipe = Pipe()
-    pipe.unpack(PIPE_FILE)
-
-    loader = pipe.transform(df)[1]
 
     return pred(loader, model, "cpu")
 

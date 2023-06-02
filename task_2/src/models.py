@@ -189,3 +189,56 @@ class fc_model_res_d(t.nn.Module):
 
         return out
 
+class fc_model_mul(t.nn.Module):
+    def __init__(self, input_dim, layers=[256, 16], device='cpu'):
+        super().__init__()
+        self.device=device
+
+        self.base=t.nn.Sequential(
+            t.nn.Linear(input_dim, layers[0]),
+            t.nn.ReLU(),
+        )
+
+        self.zero = t.nn.ParameterList([
+            t.nn.Sequential(
+                t.nn.Linear(layers[0], layers[1]),
+                t.nn.ReLU(),
+                t.nn.Linear(layers[1], 1),
+            ),
+            t.nn.Sequential(
+                t.nn.Linear(layers[0], layers[1]),
+                t.nn.ReLU(),
+                t.nn.Linear(layers[1], 1),
+            )
+        ])
+
+        self.one = t.nn.ParameterList([
+            t.nn.Sequential(
+                t.nn.Linear(layers[0], layers[1]),
+                t.nn.ReLU(),
+                t.nn.Linear(layers[1], 1),
+            ),
+            t.nn.Sequential(
+                t.nn.Linear(layers[0], layers[1]),
+                t.nn.ReLU(),
+                t.nn.Linear(layers[1], 1),
+            )
+        ])
+
+
+
+    def forward(self, X):
+        out = t.zeros((X.shape[0], 2), device=self.device, dtype=t.float32)
+        
+        inds_one = (X[:, -1] == t.scalar_tensor(1)).nonzero().T[0]
+        inds_zero = (X[:, -1] == t.scalar_tensor(0)).nonzero().T[0]
+
+        step = self.base(X)
+
+        out[inds_zero, 0] = self.zero[0](step[inds_zero]).squeeze()
+        out[inds_zero, 1] = self.zero[1](step[inds_zero]).squeeze()
+
+        out[inds_one, 0] = self.one[0](step[inds_one]).squeeze()
+        out[inds_one, 1] = self.one[1](step[inds_one]).squeeze()     
+
+        return out
